@@ -1,0 +1,44 @@
+{
+    "data_paths": {
+        "dealers": "data/dealers.parquet",
+        "ftcs": "data/ftcs.parquet",
+        "relationships": "data/relationships.parquet",
+        "proximity": "data/proximity.parquet"
+    },
+    "optimization": {
+        "alpha_1": 0.5,
+        "alpha_2": 0.3,
+        "lambda": 0.1,
+        "time_limit": 3600,
+        "optimality_gap": 0.01
+    },
+    "clustering": {
+        "method": "kmeans",
+        "min_cluster_size": 3,
+        "max_cluster_size": 25,
+        "cluster_ratio": 1.5
+    },
+    "solver": {
+        "time_limit_seconds": 300,
+        "num_workers": 4,
+        "optimality_gap": 0.05
+    },
+    "scheduler": {
+        "enabled": true,
+        "cron_hour": 2,
+        "cron_minute": 0,
+        "max_concurrent_jobs": 1
+    },
+    "constraints": {
+        "max_dealers_per_ftc": 25,
+        "min_dealers_per_ftc": 1,
+        "max_travel_radius_km": 50,
+        "workload_balance_threshold": 0.3
+    },
+    "validation": {
+        "dealer_type_values": ["static", "mobile"],
+        "latitude_range": [-90, 90],
+        "longitude_range": [-180, 180],
+        "ntb_share_range": [0, 1]
+    }
+}

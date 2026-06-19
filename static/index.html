@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Territory Optimizer Dashboard</title>
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="logo">
+                <h1>Territory Optimizer</h1>
+                <p>Data-driven spatial clustering</p>
+            </div>
+
+            <div class="control-panel">
+                <div class="panel-section glass-panel">
+                    <h2>1. Data Generation</h2>
+                    <div class="form-group">
+                        <label for="dealers-input">Number of Dealers (Sample)</label>
+                        <input type="number" id="dealers-input" value="1000" min="100" max="100000">
+                    </div>
+                    <div class="form-group">
+                        <label for="ftcs-input">Number of FTCs</label>
+                        <input type="number" id="ftcs-input" value="100" min="10" max="30000">
+                    </div>
+                    <button id="btn-generate" class="btn primary-btn">Generate Data</button>
+                    <div id="gen-status" class="status-msg"></div>
+                </div>
+
+                <div class="panel-section glass-panel">
+                    <h2>2. Optimization</h2>
+                    <p class="helper-text">Run Google OR-Tools to reallocate territories for minimal disruption and max efficiency.</p>
+                    <button id="btn-optimize" class="btn accent-btn">Run Optimization</button>
+                    <div id="opt-status" class="status-msg"></div>
+                </div>
+
+                <div class="panel-section glass-panel">
+                    <h2>3. Visualization Layers</h2>
+                    <div class="toggle-group">
+                        <label class="toggle-label">
+                            <input type="checkbox" id="layer-ftcs" checked> Show FTCs (Green)
+                        </label>
+                        <label class="toggle-label">
+                            <input type="checkbox" id="layer-dealers" checked> Show Dealers (Blue)
+                        </label>
+                        <label class="toggle-label">
+                            <input type="checkbox" id="layer-old-links" checked> Old Assignments (Red)
+                        </label>
+                        <label class="toggle-label">
+                            <input type="checkbox" id="layer-new-links" checked> New Territories (Purple)
+                        </label>
+                        <label class="toggle-label">
+                            <input type="checkbox" id="toggle-distances"> Show Distances (km)
+                        </label>
+                        <label class="toggle-label">
+                            <input type="checkbox" id="toggle-measure"> 📏 Measure Distance
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content Map -->
+        <main class="map-container">
+            <div id="map"></div>
+            
+            <div id="measure-info" class="measure-info">
+                📏 Total: <span class="measure-val" id="measure-total">0.0</span> km
+            </div>
+
+            <div class="map-overlay glass-panel">
+                <div class="stats-grid">
+                    <div class="stat-box">
+                        <span class="stat-label">Total Dealers</span>
+                        <span class="stat-value" id="stat-dealers">-</span>
+                    </div>
+                    <div class="stat-box">
+                        <span class="stat-label">Total FTCs</span>
+                        <span class="stat-value" id="stat-ftcs">-</span>
+                    </div>
+                    <div class="stat-box">
+                        <span class="stat-label">Optimization Status</span>
+                        <span class="stat-value" id="stat-status">Pending</span>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <!-- Custom JS -->
+    <script src="app.js"></script>
+</body>
+</html>
