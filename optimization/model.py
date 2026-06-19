@@ -87,6 +87,10 @@ class TerritoryModel:
                 fallback_ftc = int(np.argmax(compatibility[i] - distance[i]))
                 feasibility_mask[i, fallback_ftc] = 1
 
+        # Save pre-expansion mask for post-solve enforcement (cluster cohesion
+        # can give individual dealers FTCs that only their cluster-mates can reach).
+        pre_enforce_mask = feasibility_mask.copy()
+
         # Expand feasibility mask for cluster cohesion: within a compact micro-location
         # cluster, if any dealer can reach an FTC, allow all dealers in that cluster to
         # reach it too.  This guarantees the cluster cohesion constraint (added in the
@@ -137,8 +141,75 @@ class TerritoryModel:
             cluster_labels=cluster_labels
         )
 
-        # Validate solution
+        # Enforce individual dealer feasibility against the pre-expansion mask.
+        # The cluster cohesion expansion lets clusters share FTCs across members,
+        # which can give individual dealers assignments that their own feasibility
+        # mask would have blocked.  This pass fixes that.
         if result['status'] in ('OPTIMAL', 'FEASIBLE'):
+            if distance_km is not None:
+                assign = result['assignments']
+                ftc_counts = assign.sum(axis=0).astype(int)
+                any_fixed = False
+                violations_before = 0
+                for i in range(num_dealers):
+                    j = np.argmax(assign[i])
+                    if pre_enforce_mask[i, j] != 1:
+                        violations_before += 1
+                if violations_before:
+                    logger.info(f"  Enforcement: {violations_before} dealers in infeasible FTCs")
+                for i in range(num_dealers):
+                    j = np.argmax(assign[i])
+                    if pre_enforce_mask[i, j] == 1:
+                        continue
+                    # Move to nearest truly feasible FTC
+                    feasible_ftcs = np.where(pre_enforce_mask[i] == 1)[0]
+                    if len(feasible_ftcs) == 0:
+                        continue
+                    order = feasible_ftcs[np.argsort(distance_km[i][feasible_ftcs])]
+                    for candidate in order:
+                        if ftc_counts[candidate] < max_d:
+                            assign[i, :] = 0
+                            assign[i, candidate] = 1
+                            ftc_counts[candidate] += 1
+                            ftc_counts[j] -= 1
+                            any_fixed = True
+                            break
+                # Second pass: relax capacity for any remaining violations
+                for i in range(num_dealers):
+                    j = np.argmax(assign[i])
+                    if pre_enforce_mask[i, j] == 1:
+                        continue
+                    feasible_ftcs = np.where(pre_enforce_mask[i] == 1)[0]
+                    if len(feasible_ftcs) == 0:
+                        continue
+                    order = feasible_ftcs[np.argsort(distance_km[i][feasible_ftcs])]
+                    candidate = order[0]
+                    assign[i, :] = 0
+                    assign[i, candidate] = 1
+                    ftc_counts[candidate] += 1
+                    ftc_counts[j] -= 1
+                    any_fixed = True
+                if any_fixed:
+                    logger.info(f"  Fixed {violations_before} dealer-level feasibility violations")
+                    result['assignments'] = assign
+                    # Recompute stale metrics from corrected assignment
+                    cur = result.get('current_assignment')
+                    if cur is None or cur.shape != assign.shape:
+                        cur = np.zeros_like(assign)
+                    diff = np.abs(assign - cur)
+                    result['total_changes'] = int(np.sum(diff))
+                    result['changed_dealers'] = int(np.sum(np.any(diff > 0, axis=1)))
+                    result['change_rate'] = result['changed_dealers'] / num_dealers
+                    result['ftcs_used'] = int(np.sum(assign.sum(axis=0) > 0))
+                    if distance_km is not None:
+                        new_dists = [distance_km[i, np.argmax(assign[i])] for i in range(num_dealers)]
+                        result['mean_distance_km'] = float(np.mean(new_dists))
+                        result['median_distance_km'] = float(np.median(new_dists))
+                    logger.info(f"  Post-fix: {result['changed_dealers']} changed, "
+                                 f"{result['ftcs_used']} active, "
+                                 f"mean={result['mean_distance_km']:.2f}km")
+
+            # Validate final solution
             validation = self.constraints.validate_solution(
                 result['assignments'],
                 distance_km

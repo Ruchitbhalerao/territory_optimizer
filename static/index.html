@@ -37,7 +37,20 @@
 
                 <div class="panel-section glass-panel">
                     <h2>2. Optimization</h2>
-                    <p class="helper-text">Run Google OR-Tools to reallocate territories for minimal disruption and max efficiency.</p>
+                    <p class="helper-text">Reallocate territories for minimal distance and max efficiency.</p>
+                    <label class="toggle-label" style="margin-bottom:12px;">
+                        <input type="checkbox" id="toggle-minimize-disruption"> Minimize Disruption (keep dealers at their current FTC)
+                    </label>
+                    <label class="toggle-label" style="margin-bottom:8px;">
+                        <input type="checkbox" id="toggle-limit-radius"> Limit Dealer–FTC Distance
+                    </label>
+                    <div id="radius-input-wrapper" style="display:none; margin-bottom:12px;">
+                        <label style="font-size:13px; color:#b0b0b0;">
+                            Max Distance (km):
+                            <input type="number" id="input-max-radius" value="50" min="1" max="200"
+                                   style="width:70px; margin-left:8px; padding:4px 8px; border-radius:6px; border:1px solid #444; background:#1a1a2e; color:#fff; font-size:13px;">
+                        </label>
+                    </div>
                     <button id="btn-optimize" class="btn accent-btn">Run Optimization</button>
                     <div id="opt-status" class="status-msg"></div>
                 </div>
@@ -63,6 +76,51 @@
                         <label class="toggle-label">
                             <input type="checkbox" id="toggle-measure"> 📏 Measure Distance
                         </label>
+                    </div>
+                </div>
+
+                <div class="panel-section glass-panel stats-panel">
+                    <div class="collapse-header" id="stats-toggle">
+                        <h2>4. Optimization Stats</h2>
+                        <span class="collapse-arrow">▾</span>
+                    </div>
+                    <div class="collapse-body" id="stats-body">
+                        <div class="stat-row">
+                            <span class="stat-row-label">Dealers Retained at Same FTC</span>
+                            <span class="stat-row-value" id="stat-retained">—</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-row-label">Dealers Changed FTC</span>
+                            <span class="stat-row-value" id="stat-changed">—</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-row-label">Unallocated Dealers</span>
+                            <span class="stat-row-value" id="stat-unalloc-dealers">—</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-row-label">Active FTCs</span>
+                            <span class="stat-row-value" id="stat-active-ftcs">—</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-row-label">Unallocated / Idle FTCs</span>
+                            <span class="stat-row-value" id="stat-idle-ftcs">—</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-row-label">Min Dealers at an FTC</span>
+                            <span class="stat-row-value" id="stat-min-dealers">—</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-row-label">Max Dealers at an FTC</span>
+                            <span class="stat-row-value" id="stat-max-dealers">—</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-row-label">Mean Dealers per Active FTC</span>
+                            <span class="stat-row-value" id="stat-mean-dealers">—</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-row-label">Median Dealers per Active FTC</span>
+                            <span class="stat-row-value" id="stat-median-dealers">—</span>
+                        </div>
                     </div>
                 </div>
             </div>

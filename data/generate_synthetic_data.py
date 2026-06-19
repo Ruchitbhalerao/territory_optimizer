@@ -5,6 +5,7 @@ Generates realistic dealer, FTC, relationship, and proximity datasets
 for development and testing purposes.
 """
 import logging
+import math
 import random
 from pathlib import Path
 from typing import Dict, List, Tuple
@@ -13,6 +14,13 @@ import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+
+def _jitter_offset(min_deg: float = 0.001, max_deg: float = 0.008) -> Tuple[float, float]:
+    """Return (dlat, dlon) with a random direction and radius in [min_deg, max_deg]."""
+    angle = random.uniform(0, 2 * math.pi)
+    radius = random.uniform(min_deg, max_deg)
+    return radius * math.cos(angle), radius * math.sin(angle)
 
 # Indian metro area centers (lat, lon) with approximate spread radius
 METRO_AREAS = {
@@ -195,11 +203,12 @@ class SyntheticDataGenerator:
                 num_products = np.random.choice([1, 2], p=[0.6, 0.4])
                 product_group = ','.join(random.sample(PRODUCT_GROUPS, num_products))
 
-                # Anchor FTC on a random dealer from this city, jitter ~500m
+                # Anchor FTC near a random dealer from this city, minimum 100m offset
                 if city_dealers:
                     anchor = random.choice(city_dealers)
-                    lat = anchor['dealer_latitude'] + np.random.normal(0, 0.005)
-                    lon = anchor['dealer_longitude'] + np.random.normal(0, 0.005)
+                    dlat, dlon = _jitter_offset()
+                    lat = anchor['dealer_latitude'] + dlat
+                    lon = anchor['dealer_longitude'] + dlon
                 else:
                     center_lat, center_lon = info['center']
                     radius = info['radius']
@@ -229,8 +238,9 @@ class SyntheticDataGenerator:
             city_dealers = dealer_by_city.get(city, [])
             if city_dealers:
                 anchor = random.choice(city_dealers)
-                lat = anchor['dealer_latitude'] + np.random.normal(0, 0.005)
-                lon = anchor['dealer_longitude'] + np.random.normal(0, 0.005)
+                dlat, dlon = _jitter_offset()
+                lat = anchor['dealer_latitude'] + dlat
+                lon = anchor['dealer_longitude'] + dlon
             else:
                 info = METRO_AREAS[city]
                 center_lat, center_lon = info['center']

@@ -1,35 +1,35 @@
 ======================================================================
 TERRITORY OPTIMIZATION REPORT
-Generated: 2026-06-18 11:50:57
+Generated: 2026-06-19 14:56:33
 ======================================================================
 
 OVERVIEW
 ----------------------------------------
-  Job ID:           job_d5c13407d1ea
+  Job ID:           job_f9a0016b8f12
   Status:           FEASIBLE
   Total Dealers:    1000
   Total FTCs:       100
   Clusters Created: 144
   Solve Time:       0.02s
-  Pipeline Time:    2.85s
+  Pipeline Time:    2.31s
 
 REASSIGNMENT SUMMARY
 ----------------------------------------
-  Dealers Reassigned: 915
-  Total Changes:      1830
-  Change Rate:        91.5%
+  Dealers Reassigned: 798
+  Total Changes:      1596
+  Change Rate:        79.8%
   Active FTCs:        100
 
 DISTANCE METRICS
 ----------------------------------------
-  Mean Distance:      6.81 km
-  Median Distance:    6.24 km
+  Mean Distance:      25.55 km
+  Median Distance:    9.63 km
 
 BUSINESS IMPACT
 ----------------------------------------
-  Compatibility Improvement: -41.35%
-  Distance Reduction:        95.59%
-  Workload Balance Improvement: -49.02%
-  Disruption Change Rate:    183.00%
+  Compatibility Improvement: 27.49%
+  Distance Reduction:        81.86%
+  Workload Balance Improvement: -41.42%
+  Disruption Change Rate:    159.60%
 
 ======================================================================

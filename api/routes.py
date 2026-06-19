@@ -207,9 +207,6 @@ def get_dealers():
     try:
         loader = DataLoader()
         df = loader.load_dealers()
-        if len(df) > 1000:
-            df = df.sample(1000, random_state=42)
-        # Convert NaN to None for JSON serialization
         df = df.where(df.notnull(), None)
         return jsonify(df.to_dict(orient='records')), 200
     except Exception as e:
@@ -222,8 +219,6 @@ def get_ftcs():
     try:
         loader = DataLoader()
         df = loader.load_ftcs()
-        if len(df) > 500:
-            df = df.sample(500, random_state=42)
         df = df.where(df.notnull(), None)
         return jsonify(df.to_dict(orient='records')), 200
     except Exception as e:

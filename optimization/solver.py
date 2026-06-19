@@ -105,14 +105,23 @@ class TerritorySolver:
             feasible_order = [j for j in order if cluster_feasible[c_idx, j]]
             sorted_feasible.append(feasible_order)
 
-        # Phase 1: nearest-feasible-FTC assignment with dealer count capacity.
+        # Determine each cluster's current FTC (majority vote among its dealers)
+        cluster_current_ftc = np.full(num_clusters, -1, dtype=int)
+        for c_idx, indices in enumerate(cluster_dealer_indices):
+            ftc_counts = current_assignment[indices].sum(axis=0)
+            if ftc_counts.sum() > 0:
+                cluster_current_ftc[c_idx] = np.argmax(ftc_counts)
+
+        # Phase 1: assignment with dealer count capacity.
+        # When lambda_penalty > 0, prefer keeping each cluster at its current FTC.
         # Process clusters in order of fewest options first (most constrained).
         n_feasible = np.array([len(sf) for sf in sorted_feasible])
         process_order = np.argsort(n_feasible)
 
         rng = np.random.RandomState(42)
         best_assign = None
-        best_mean_dist = np.inf
+        best_score = -np.inf
+        use_disruption = lambda_penalty > 0.5
 
         for trial in range(6):
             assign = np.full(num_clusters, -1, dtype=int)
@@ -124,24 +133,37 @@ class TerritorySolver:
             for c_idx in shuffled:
                 s = cluster_sizes_arr[c_idx]
                 chosen = -1
-                for j in sorted_feasible[c_idx]:
-                    if ftc_cnt[j] + s <= max_dealers:
-                        chosen = j
-                        break
+                # If disruption minimization is active and current FTC has room, keep it
+                current_j = cluster_current_ftc[c_idx]
+                if use_disruption and current_j >= 0:
+                    if (cluster_feasible[c_idx, current_j]
+                            and ftc_cnt[current_j] + s <= max_dealers):
+                        chosen = current_j
+                if chosen < 0:
+                    for j in sorted_feasible[c_idx]:
+                        if ftc_cnt[j] + s <= max_dealers:
+                            chosen = j
+                            break
                 if chosen < 0:
                     chosen = sorted_feasible[c_idx][0]
                 assign[c_idx] = chosen
                 ftc_cnt[chosen] += s
 
-            # Score by mean distance (lower is better)
+            # Score: lower distance + higher retention = better
             total_km = 0.0
+            kept = 0
             for c_idx, j in enumerate(assign):
                 total_km += cluster_mean_dist[c_idx, j] * cluster_sizes_arr[c_idx]
+                if use_disruption and j == cluster_current_ftc[c_idx]:
+                    kept += cluster_sizes_arr[c_idx]
             mean_dist = total_km / cluster_sizes_arr.sum()
+            kept_ratio = kept / cluster_sizes_arr.sum() if use_disruption else 0.0
+            trial_score = -mean_dist + lambda_penalty * kept_ratio
 
-            if mean_dist < best_mean_dist:
-                best_mean_dist = mean_dist
+            if trial_score > best_score:
+                best_score = trial_score
                 best_assign = assign.copy()
+                logger.info(f"  Trial {trial}: mean_dist={mean_dist:.2f}km, kept={kept_ratio:.0%} (score={trial_score:.2f})")
 
         assignment = best_assign.copy()
 
@@ -223,8 +245,10 @@ class TerritorySolver:
                     break
 
         # Phase 4: swap refinement — reduce mean distance without violating capacity
-        logger.info("Running swap refinement to reduce mean distance")
-        for iteration in range(20):
+        # Skipped when disruption minimization is active (undoes kept assignments)
+        if not use_disruption:
+            logger.info("Running swap refinement to reduce mean distance")
+        for iteration in range(20 if not use_disruption else 0):
             improved = False
             for c1 in range(num_clusters):
                 j1 = assignment[c1]
@@ -388,7 +412,8 @@ class TerritorySolver:
         logger.info(f"Greedy solution: {changed_dealers}/{num_dealers} dealers reassigned, "
                      f"{ftcs_used} FTCs active, "
                      f"mean dist={mean_distance_km:.2f}km, median dist={median_distance_km:.2f}km, "
-                     f"objective={raw_obj:.1f}")
+                     f"objective={raw_obj:.1f}, "
+                     f"kept={1-changed_dealers/num_dealers:.0%}")
         return result
 
     def _solve_cpsat(self,

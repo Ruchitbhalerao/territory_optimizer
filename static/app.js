@@ -60,6 +60,13 @@ function initMap() {
 function setupEventListeners() {
     document.getElementById('btn-generate').addEventListener('click', generateData);
     document.getElementById('btn-optimize').addEventListener('click', runOptimization);
+    const toggleRadius = document.getElementById('toggle-limit-radius');
+    const wrapper = document.getElementById('radius-input-wrapper');
+    if (toggleRadius && wrapper) {
+        toggleRadius.addEventListener('change', () => {
+            wrapper.style.display = toggleRadius.checked ? 'block' : 'none';
+        });
+    }
     
     // Layer toggles
     document.getElementById('layer-ftcs').addEventListener('change', (e) => toggleLayer(layerGroupFtcs, e.target.checked));
@@ -77,6 +84,17 @@ function setupEventListeners() {
             stopMeasure();
         }
     });
+
+    // Stats panel collapse
+    const statsToggle = document.getElementById('stats-toggle');
+    const statsBody = document.getElementById('stats-body');
+    const statsArrow = statsToggle?.querySelector('.collapse-arrow');
+    if (statsToggle && statsBody) {
+        statsToggle.addEventListener('click', () => {
+            const hidden = statsBody.classList.toggle('hidden');
+            if (statsArrow) statsArrow.classList.toggle('collapsed', hidden);
+        });
+    }
 }
 
 function toggleLayer(layer, show) {
@@ -172,10 +190,20 @@ async function runOptimization() {
     statStatus.innerText = 'Running...';
 
     try {
+        const params = { "solver.time_limit_seconds": 30 };
+        if (document.getElementById('toggle-minimize-disruption').checked) {
+            params["optimization.lambda"] = 5.0;
+        }
+        if (document.getElementById('toggle-limit-radius').checked) {
+            const radiusInput = document.getElementById('input-max-radius');
+            params["constraints.max_travel_radius_km"] = parseFloat(radiusInput?.value) || 50;
+        } else {
+            params["constraints.max_travel_radius_km"] = 999;
+        }
         const res = await fetch(`${API_BASE}/optimize`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ parameters: { "solver.time_limit_seconds": 30 } })
+            body: JSON.stringify({ parameters: params })
         });
         
         const json = await res.json();
@@ -206,10 +234,69 @@ async function fetchChanges(jobId) {
             const json = await res.json();
             data.changes = json.changes || [];
             renderNewTerritories();
+            updateStatsPanel();
         }
     } catch (e) {
         console.error("Failed to fetch changes", e);
     }
+}
+
+function updateStatsPanel() {
+    const dealers = data.dealers;
+    const ftcs = data.ftcs;
+    const changes = data.changes;
+    const relationships = data.relationships;
+
+    // Build final assignment map
+    const assignment = {};
+    relationships.forEach(r => { assignment[r.dealer_id] = r.ftc_id; });
+    changes.forEach(c => { assignment[c.dealer_id] = c.to_ftc; });
+
+    const totalDealers = dealers.length;
+    const totalFtcs = ftcs.length;
+
+    // Retained / changed
+    const changedSet = new Set(changes.map(c => c.dealer_id));
+    const retained = totalDealers - changedSet.size;
+    const retainedPct = totalDealers ? (retained / totalDealers * 100) : 0;
+    document.getElementById('stat-retained').textContent = `${retained} / ${totalDealers} (${retainedPct.toFixed(1)}%)`;
+    document.getElementById('stat-changed').textContent = `${changedSet.size} / ${totalDealers} (${(100 - retainedPct).toFixed(1)}%)`;
+
+    // Unallocated dealers
+    const unallocDealers = dealers.filter(d => !assignment[d.dealer_id]);
+    document.getElementById('stat-unalloc-dealers').textContent = unallocDealers.length;
+
+    // Per-FTC counts
+    const ftcCounts = {};
+    Object.values(assignment).forEach(fid => {
+        ftcCounts[fid] = (ftcCounts[fid] || 0) + 1;
+    });
+    const activeFtcs = Object.keys(ftcCounts).length;
+    const idleFtcs = totalFtcs - activeFtcs;
+    document.getElementById('stat-active-ftcs').textContent = `${activeFtcs} / ${totalFtcs}`;
+    document.getElementById('stat-idle-ftcs').textContent = idleFtcs;
+
+    // Distribution stats
+    const counts = Object.values(ftcCounts);
+    if (counts.length) {
+        const min = Math.min(...counts);
+        const max = Math.max(...counts);
+        const mean = counts.reduce((a, b) => a + b, 0) / counts.length;
+        const sorted = [...counts].sort((a, b) => a - b);
+        const median = sorted.length % 2 === 0
+            ? (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2
+            : sorted[Math.floor(sorted.length / 2)];
+        document.getElementById('stat-min-dealers').textContent = min;
+        document.getElementById('stat-max-dealers').textContent = max;
+        document.getElementById('stat-mean-dealers').textContent = mean.toFixed(1);
+        document.getElementById('stat-median-dealers').textContent = median.toFixed(1);
+    }
+
+    // Color-code warnings
+    const elActive = document.getElementById('stat-active-ftcs');
+    elActive.className = 'stat-row-value' + (activeFtcs > 0 ? ' good' : ' bad');
+    const elIdle = document.getElementById('stat-idle-ftcs');
+    elIdle.className = 'stat-row-value' + (idleFtcs > 0 ? ' warn' : ' good');
 }
 
 function haversineKm(lat1, lon1, lat2, lon2) {
@@ -249,6 +336,7 @@ function renderDistances() {
     if (!ftcCoords || dealers.length === 0) return;
 
     const mid = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    const changedDealers = new Set(data.changes.map(c => c.dealer_id));
 
     // ---- FTC → Dealer ----
     // Place a clean pill label at the midpoint of each existing purple link.
@@ -258,8 +346,9 @@ function renderDistances() {
     dealers.forEach(d => {
         const dist = haversineKm(ftcCoords.lat, ftcCoords.lon, d.dealer_latitude, d.dealer_longitude);
         const dealerLatLng = [d.dealer_latitude, d.dealer_longitude];
+        const lineColor = data.changes.length > 0 && !changedDealers.has(d.dealer_id) ? '#22c55e' : 'rgba(255, 255, 255, 0.15)';
         L.polyline([ftcLatLng, dealerLatLng], {
-            color: 'rgba(255, 255, 255, 0.15)',
+            color: lineColor,
             weight: 1
         }).addTo(layerGroupDistances);
 
