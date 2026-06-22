@@ -107,6 +107,27 @@ class TerritoryModel:
                     feasibility_mask[i] = cluster_union
             logger.info(f"Expanded feasibility mask for {len(unique_clusters)} clusters")
 
+        # Enforce static dealers stay at their current FTC.
+        # A static dealer cannot be reassigned to a different FTC; only the
+        # FTC they are currently assigned to is feasible.
+        dealers_df = features.get('dealers')
+        if dealers_df is not None and 'dealer_type' in dealers_df.columns:
+            static_mask = dealers_df['dealer_type'].str.lower() == 'static'
+            static_count = static_mask.sum()
+            if static_count > 0:
+                frozen = 0
+                for i in range(num_dealers):
+                    if not static_mask.iloc[i]:
+                        continue
+                    current_ftc = np.where(assignment_matrix[i] == 1)[0]
+                    if len(current_ftc) > 0:
+                        feasibility_mask[i, :] = 0
+                        feasibility_mask[i, current_ftc[0]] = 1
+                        pre_enforce_mask[i, :] = 0
+                        pre_enforce_mask[i, current_ftc[0]] = 1
+                        frozen += 1
+                logger.info(f"Frozen {frozen}/{static_count} static dealers to their current FTC")
+
         # Get optimization parameters
         opt_config = self.config.get('optimization', {})
         alpha_1 = opt_config.get('alpha_1', 0.5)

@@ -60,6 +60,14 @@ function initMap() {
 function setupEventListeners() {
     document.getElementById('btn-generate').addEventListener('click', generateData);
     document.getElementById('btn-optimize').addEventListener('click', runOptimization);
+    document.getElementById('btn-upload').addEventListener('click', uploadExcelData);
+    const toggleUpload = document.getElementById('toggle-upload');
+    const uploadInputs = document.getElementById('upload-inputs');
+    if (toggleUpload && uploadInputs) {
+        toggleUpload.addEventListener('change', () => {
+            uploadInputs.style.display = toggleUpload.checked ? 'block' : 'none';
+        });
+    }
     const toggleRadius = document.getElementById('toggle-limit-radius');
     const wrapper = document.getElementById('radius-input-wrapper');
     if (toggleRadius && wrapper) {
@@ -140,6 +148,55 @@ async function fetchRelationships() {
     }
 }
 
+async function uploadExcelData() {
+    const btn = document.getElementById('btn-upload');
+    const statusEl = document.getElementById('upload-status');
+    const fileInput = document.getElementById('file-input');
+
+    if (!fileInput.files.length) {
+        statusEl.innerHTML = '<span class="text-error">Please select a file</span>';
+        return;
+    }
+
+    btn.disabled = true;
+    btn.innerHTML = '<div class="loader"></div> Uploading...';
+    statusEl.innerHTML = '';
+
+    try {
+        const formData = new FormData();
+        formData.append('file', fileInput.files[0]);
+
+        const res = await fetch(`${API_BASE}/upload`, {
+            method: 'POST',
+            body: formData
+        });
+
+        const json = await res.json();
+        if (res.ok) {
+            const s = json.stats || {};
+            const parts = [];
+            if (s.dealers) parts.push(`${s.dealers} dealers`);
+            if (s.ftcs) parts.push(`${s.ftcs} FTCs`);
+            if (s.relationships) parts.push(`${s.relationships} relationships`);
+            statusEl.innerHTML = `<span class="text-success">Uploaded: ${parts.join(', ')}</span>`;
+
+            data.changes = [];
+            layerGroupNewLinks.clearLayers();
+            currentJobId = null;
+            document.getElementById('stat-status').innerText = 'Pending';
+
+            await fetchInitialData();
+        } else {
+            statusEl.innerHTML = `<span class="text-error">Error: ${json.message}</span>`;
+        }
+    } catch (e) {
+        statusEl.innerHTML = `<span class="text-error">Error: ${e.message}</span>`;
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = 'Upload & Process';
+    }
+}
+
 async function generateData() {
     const btn = document.getElementById('btn-generate');
     const statusEl = document.getElementById('gen-status');
@@ -190,7 +247,7 @@ async function runOptimization() {
     statStatus.innerText = 'Running...';
 
     try {
-        const params = { "solver.time_limit_seconds": 30 };
+        const params = { "solver.time_limit_seconds": 10 };
         if (document.getElementById('toggle-minimize-disruption').checked) {
             params["optimization.lambda"] = 5.0;
         }
@@ -480,21 +537,53 @@ function renderMap() {
     layerGroupFtcs.clearLayers();
     layerGroupDealers.clearLayers();
     layerGroupOldLinks.clearLayers();
+    layerGroupNewLinks.clearLayers();
     
-    // Create maps for quick lookup
-    const ftcMap = {};
     const dealerMap = {};
+    const dealerBounds = [];
 
-    // Calculate approximate FTC coordinates based on dealer clusters
+    // Collect valid dealer coordinates
+    data.dealers.forEach(d => {
+        dealerMap[d.dealer_id] = d;
+        const lat = parseFloat(d.dealer_latitude);
+        const lng = parseFloat(d.dealer_longitude);
+        if (isNaN(lat) || isNaN(lng)) return;
+        dealerBounds.push([lat, lng]);
+    });
+
+    // Compute overall centroid of all dealers (fallback for orphan FTCs)
+    let globalCentroid = null;
+    if (dealerBounds.length > 0) {
+        const sumLat = dealerBounds.reduce((s, p) => s + p[0], 0);
+        const sumLng = dealerBounds.reduce((s, p) => s + p[1], 0);
+        globalCentroid = { lat: sumLat / dealerBounds.length, lng: sumLng / dealerBounds.length };
+    }
+
+    // Build ftcMap: position each FTC at the centroid of its linked dealers.
+    // If an FTC has no linked dealers, use the global dealer centroid.
+    const ftcMap = {};
     data.relationships.forEach(r => {
-        const d = data.dealers.find(dealer => dealer.dealer_id === r.dealer_id);
-        if (d) {
-            if (!ftcMap[r.ftc_id]) {
-                ftcMap[r.ftc_id] = { latSum: 0, lonSum: 0, count: 0 };
-            }
-            ftcMap[r.ftc_id].latSum += d.dealer_latitude;
-            ftcMap[r.ftc_id].lonSum += d.dealer_longitude;
-            ftcMap[r.ftc_id].count += 1;
+        const d = dealerMap[r.dealer_id];
+        if (!d) return;
+        const lat = parseFloat(d.dealer_latitude);
+        const lng = parseFloat(d.dealer_longitude);
+        if (isNaN(lat) || isNaN(lng)) return;
+        if (!ftcMap[r.ftc_id]) {
+            ftcMap[r.ftc_id] = { latSum: 0, lonSum: 0, count: 0 };
+        }
+        ftcMap[r.ftc_id].latSum += lat;
+        ftcMap[r.ftc_id].lonSum += lng;
+        ftcMap[r.ftc_id].count += 1;
+    });
+
+    // Ensure every FTC from data.ftcs has a position (even if orphaned)
+    data.ftcs.forEach(f => {
+        if (!ftcMap[f.ftc_id] && globalCentroid) {
+            ftcMap[f.ftc_id] = {
+                latSum: globalCentroid.lat,
+                lonSum: globalCentroid.lng,
+                count: 1
+            };
         }
     });
 
@@ -524,33 +613,43 @@ function renderMap() {
     data.relationships.forEach(r => { initialAssignments[r.dealer_id] = r.ftc_id; });
 
     data.dealers.forEach(d => {
-        dealerMap[d.dealer_id] = d;
+        const lat = parseFloat(d.dealer_latitude);
+        const lng = parseFloat(d.dealer_longitude);
+        if (isNaN(lat) || isNaN(lng)) return;
         const currentFtc = initialAssignments[d.dealer_id] || 'None';
         const popupContent = `<b>Dealer:</b> ${d.dealer_id}<br><b>Original FTC:</b> ${currentFtc}`;
         
-        const marker = L.marker([d.dealer_latitude, d.dealer_longitude], { 
+        const marker = L.marker([lat, lng], { 
             icon: dealerIcon,
             dealerId: d.dealer_id
         }).bindPopup(popupContent).addTo(layerGroupDealers);
         marker.on('click', () => handleMarkerClick(d.dealer_id, 'dealer'));
     });
 
-    // Render Old Links (Red)
+    // Render Old Links (Red) — connect every dealer to its assigned FTC
     data.relationships.forEach(r => {
         const d = dealerMap[r.dealer_id];
         const f = ftcMap[r.ftc_id];
-        if (d && f) {
-            L.polyline([
-                [d.dealer_latitude, d.dealer_longitude],
-                [f.lat, f.lon]
-            ], { 
-                color: 'rgba(239, 68, 68, 0.2)', 
-                weight: 1,
-                dealerId: r.dealer_id,
-                ftcId: r.ftc_id
-            }).addTo(layerGroupOldLinks);
-        }
+        if (!d || !f) return;
+        const lat = parseFloat(d.dealer_latitude);
+        const lng = parseFloat(d.dealer_longitude);
+        if (isNaN(lat) || isNaN(lng)) return;
+        L.polyline([
+            [lat, lng],
+            [f.lat, f.lon]
+        ], { 
+            color: 'rgba(239, 68, 68, 0.2)', 
+            weight: 1,
+            dealerId: r.dealer_id,
+            ftcId: r.ftc_id
+        }).addTo(layerGroupOldLinks);
     });
+    
+    // Auto-fit map to data bounds
+    if (dealerBounds.length > 0) {
+        const bounds = L.latLngBounds(dealerBounds);
+        map.fitBounds(bounds, { padding: [50, 50], maxZoom: 12 });
+    }
     
     updateHighlighting();
 }
@@ -558,17 +657,35 @@ function renderMap() {
 function renderNewTerritories() {
     layerGroupNewLinks.clearLayers();
     
-    // We need ftcMap again
+    // Compute FTC positions (same logic as renderMap)
+    const dealerPositions = [];
+    data.dealers.forEach(d => {
+        const lat = parseFloat(d.dealer_latitude);
+        const lng = parseFloat(d.dealer_longitude);
+        if (!isNaN(lat) && !isNaN(lng)) dealerPositions.push({ lat, lng });
+    });
+    const globalCentroid = dealerPositions.length > 0
+        ? { lat: dealerPositions.reduce((s, p) => s + p.lat, 0) / dealerPositions.length,
+            lng: dealerPositions.reduce((s, p) => s + p.lng, 0) / dealerPositions.length }
+        : null;
+
     const ftcMap = {};
     data.relationships.forEach(r => {
-        const d = data.dealers.find(dealer => dealer.dealer_id === r.dealer_id);
-        if (d) {
-            if (!ftcMap[r.ftc_id]) {
-                ftcMap[r.ftc_id] = { latSum: 0, lonSum: 0, count: 0 };
-            }
-            ftcMap[r.ftc_id].latSum += d.dealer_latitude;
-            ftcMap[r.ftc_id].lonSum += d.dealer_longitude;
-            ftcMap[r.ftc_id].count += 1;
+        const d = data.dealers.find(dd => String(dd.dealer_id) === String(r.dealer_id));
+        if (!d) return;
+        const lat = parseFloat(d.dealer_latitude);
+        const lng = parseFloat(d.dealer_longitude);
+        if (isNaN(lat) || isNaN(lng)) return;
+        if (!ftcMap[r.ftc_id]) {
+            ftcMap[r.ftc_id] = { latSum: 0, lonSum: 0, count: 0 };
+        }
+        ftcMap[r.ftc_id].latSum += lat;
+        ftcMap[r.ftc_id].lonSum += lng;
+        ftcMap[r.ftc_id].count += 1;
+    });
+    data.ftcs.forEach(f => {
+        if (!ftcMap[f.ftc_id] && globalCentroid) {
+            ftcMap[f.ftc_id] = { latSum: globalCentroid.lat, lonSum: globalCentroid.lng, count: 1 };
         }
     });
     for (const [ftcId, info] of Object.entries(ftcMap)) {
@@ -592,17 +709,19 @@ function renderNewTerritories() {
         const ftcId = newAssignments[dealerId];
         const d = dealerMap[dealerId];
         const f = ftcMap[ftcId];
-        if (d && f) {
-            L.polyline([
-                [d.dealer_latitude, d.dealer_longitude],
-                [f.lat, f.lon]
-            ], { 
-                color: 'rgba(168, 85, 247, 0.4)', 
-                weight: 2,
-                dealerId: dealerId,
-                ftcId: ftcId
-            }).addTo(layerGroupNewLinks); // Purple
-        }
+        if (!d || !f) return;
+        const lat = parseFloat(d.dealer_latitude);
+        const lng = parseFloat(d.dealer_longitude);
+        if (isNaN(lat) || isNaN(lng)) return;
+        L.polyline([
+            [lat, lng],
+            [f.lat, f.lon]
+        ], { 
+            color: 'rgba(168, 85, 247, 0.4)', 
+            weight: 2,
+            dealerId: dealerId,
+            ftcId: ftcId
+        }).addTo(layerGroupNewLinks);
     });
 
     // Update dealer popups with new assignment info + marker colors
@@ -686,6 +805,6 @@ function updateHighlighting() {
 }
 
 function updateStats() {
-    document.getElementById('stat-dealers').innerText = data.dealers.length > 0 ? `${data.dealers.length} (Sampled)` : '0';
-    document.getElementById('stat-ftcs').innerText = data.ftcs.length;
+    document.getElementById('stat-dealers').innerText = data.dealers.length || '0';
+    document.getElementById('stat-ftcs').innerText = data.ftcs.length || '0';
 }

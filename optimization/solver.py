@@ -39,7 +39,7 @@ class TerritorySolver:
         logger.info(f"Solving assignment: {num_dealers} dealers x {num_ftcs} FTCs")
         start_time = time.time()
 
-        if cluster_labels is not None and len(np.unique(cluster_labels)) > 1:
+        if cluster_labels is not None:
             return self._solve_cluster_greedy(
                 compatibility, distance, current_assignment, feasibility_mask,
                 workload, capacity, distance_km,

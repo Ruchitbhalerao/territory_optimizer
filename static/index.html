@@ -31,6 +31,17 @@
                         <label for="ftcs-input">Number of FTCs</label>
                         <input type="number" id="ftcs-input" value="100" min="10" max="30000">
                     </div>
+                    <div class="upload-section">
+                        <label class="toggle-label" style="margin-bottom:4px;">
+                            <input type="checkbox" id="toggle-upload"> Upload Excel file instead
+                        </label>
+                        <div id="upload-inputs" style="display:none;">
+                            <input type="file" id="file-input" accept=".xlsx,.xls,.zip,.csv" style="width:100%;margin:4px 0 8px;font-size:12px;">
+                            <button id="btn-upload" class="btn secondary-btn" style="width:100%;">Upload & Process</button>
+                        </div>
+                        <div id="upload-status" class="status-msg"></div>
+                    </div>
+                    <hr style="border-color:#333;margin:12px 0;">
                     <button id="btn-generate" class="btn primary-btn">Generate Data</button>
                     <div id="gen-status" class="status-msg"></div>
                 </div>

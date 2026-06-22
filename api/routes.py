@@ -13,6 +13,7 @@ from database.models import OptimizationJobModel, SolutionModel, DealerChangeMod
 from scheduler import OptimizationScheduler
 from data.generate_synthetic_data import generate_synthetic_data
 from data.loader import DataLoader
+from data.uploader import ExcelUploader
 
 logger = logging.getLogger(__name__)
 
@@ -186,6 +187,41 @@ def get_changes(job_id):
 def get_scheduler_status():
     """Get the current status of the optimization scheduler."""
     return jsonify(scheduler.get_status())
+
+@api_bp.route('/upload', methods=['POST'])
+@require_db
+def upload_data():
+    """Upload Excel file with 3 sheets (Dealers, FTCs, F2D relationships)."""
+    try:
+        if 'file' not in request.files:
+            return jsonify({'status': 'error', 'message': 'No file provided'}), 400
+
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'status': 'error', 'message': 'Empty filename'}), 400
+
+        import tempfile
+        import os
+        suffix = os.path.splitext(file.filename)[1] or '.xlsx'
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+        try:
+            file.save(tmp.name)
+            output_dir = config_manager.get_section('data').get('output_dir', 'data')
+            uploader = ExcelUploader(output_dir=output_dir)
+            stats = uploader.upload(tmp.name)
+        finally:
+            os.unlink(tmp.name)
+
+        return jsonify({
+            'status': 'success',
+            'message': 'Data uploaded and processed successfully',
+            'stats': stats
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Upload failed: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 
 @api_bp.route('/generate', methods=['POST'])
 def generate_data():

@@ -90,33 +90,32 @@ class DistanceEngineer:
     def _compute_haversine_distances(self, dealers_df: pd.DataFrame, ftcs_df: pd.DataFrame,
                                    distance_matrix: np.ndarray) -> np.ndarray:
         """
-        Compute distances using Haversine formula.
-        
-        Args:
-            dealers_df: Dealers dataframe with coordinates
-            ftcs_df: FTCs dataframe with coordinates (placeholder)
-            distance_matrix: Matrix to populate
-            
-        Returns:
-            Updated distance matrix
+        Compute distances using Haversine formula (vectorized).
         """
+        num_d, num_f = len(dealers_df), len(ftcs_df)
+
         ftc_lat_col = next((col for col in ('ftc_latitude', 'latitude', 'lat') if col in ftcs_df.columns), None)
         ftc_lon_col = next((col for col in ('ftc_longitude', 'longitude', 'lon', 'lng') if col in ftcs_df.columns), None)
 
-        if ftc_lat_col and ftc_lon_col:
-            dealer_coords = dealers_df[['dealer_latitude', 'dealer_longitude']].to_numpy(dtype=float)
+        dealer_lat_col = next((col for col in ('dealer_latitude', 'latitude', 'lat') if col in dealers_df.columns), None)
+        dealer_lon_col = next((col for col in ('dealer_longitude', 'longitude', 'lon', 'lng') if col in dealers_df.columns), None)
+
+        if ftc_lat_col and ftc_lon_col and dealer_lat_col and dealer_lon_col:
+            dealer_coords = dealers_df[[dealer_lat_col, dealer_lon_col]].to_numpy(dtype=float)
             ftc_coords = ftcs_df[[ftc_lat_col, ftc_lon_col]].to_numpy(dtype=float)
-            for i, (d_lat, d_lon) in enumerate(dealer_coords):
-                for j, (f_lat, f_lon) in enumerate(ftc_coords):
-                    distance_matrix[i, j] = self.haversine_distance(d_lat, d_lon, f_lat, f_lon)
+            dlat = np.radians(ftc_coords[np.newaxis, :, 0] - dealer_coords[:, np.newaxis, 0])
+            dlon = np.radians(ftc_coords[np.newaxis, :, 1] - dealer_coords[:, np.newaxis, 1])
+            a = (np.sin(dlat / 2) ** 2
+                 + np.cos(np.radians(dealer_coords[:, np.newaxis, 0]))
+                 * np.cos(np.radians(ftc_coords[np.newaxis, :, 0]))
+                 * np.sin(dlon / 2) ** 2)
+            distance_matrix[:] = 6371.0 * 2 * np.arcsin(np.sqrt(a))
             return distance_matrix
 
-        # Fall back to a deterministic approximation when FTC coordinates are unavailable.
-        # The optimizer still needs realistic kilometer-scale values for feasibility checks,
-        # so derive them from the dealer/FTC indices instead of tiny 0-1 random values.
-        for i in range(len(dealers_df)):
-            for j in range(len(ftcs_df)):
-                distance_matrix[i, j] = 5.0 + abs(i - j) * 2.5
+        # Vectorized fallback: derive deterministic km-scale values from indices
+        i = np.arange(num_d)[:, np.newaxis]
+        j = np.arange(num_f)[np.newaxis, :]
+        distance_matrix[:] = 5.0 + np.abs(i - j) * 2.5
         return distance_matrix
     
     def get_raw_distance_matrix(self) -> np.ndarray:
