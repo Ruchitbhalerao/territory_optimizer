@@ -31,23 +31,22 @@
                         <label for="ftcs-input">Number of FTCs</label>
                         <input type="number" id="ftcs-input" value="100" min="10" max="30000">
                     </div>
-                    <div class="upload-section">
-                        <label class="toggle-label" style="margin-bottom:4px;">
-                            <input type="checkbox" id="toggle-upload"> Upload Excel file instead
-                        </label>
-                        <div id="upload-inputs" style="display:none;">
-                            <input type="file" id="file-input" accept=".xlsx,.xls,.zip,.csv" style="width:100%;margin:4px 0 8px;font-size:12px;">
-                            <button id="btn-upload" class="btn secondary-btn" style="width:100%;">Upload & Process</button>
-                        </div>
-                        <div id="upload-status" class="status-msg"></div>
-                    </div>
-                    <hr style="border-color:#333;margin:12px 0;">
                     <button id="btn-generate" class="btn primary-btn">Generate Data</button>
                     <div id="gen-status" class="status-msg"></div>
                 </div>
 
                 <div class="panel-section glass-panel">
-                    <h2>2. Optimization</h2>
+                    <h2>2. Upload Excel</h2>
+                    <p class="helper-text">Upload your own dataset (.xlsx with 3 sheets, or .zip of 3 CSVs).</p>
+                    <div class="form-group">
+                        <input type="file" id="file-input" accept=".xlsx,.zip,.csv" style="color:#fff;font-size:13px;">
+                    </div>
+                    <button id="btn-upload" class="btn secondary-btn">Upload &amp; Replace Data</button>
+                    <div id="upload-status" class="status-msg"></div>
+                </div>
+
+                <div class="panel-section glass-panel">
+                    <h2>3. Optimization</h2>
                     <p class="helper-text">Reallocate territories for minimal distance and max efficiency.</p>
                     <label class="toggle-label" style="margin-bottom:12px;">
                         <input type="checkbox" id="toggle-minimize-disruption"> Minimize Disruption (keep dealers at their current FTC)
@@ -67,7 +66,7 @@
                 </div>
 
                 <div class="panel-section glass-panel">
-                    <h2>3. Visualization Layers</h2>
+                    <h2>4. Visualization Layers</h2>
                     <div class="toggle-group">
                         <label class="toggle-label">
                             <input type="checkbox" id="layer-ftcs" checked> Show FTCs (Green)
@@ -92,7 +91,7 @@
 
                 <div class="panel-section glass-panel stats-panel">
                     <div class="collapse-header" id="stats-toggle">
-                        <h2>4. Optimization Stats</h2>
+                        <h2>5. Optimization Stats</h2>
                         <span class="collapse-arrow">▾</span>
                     </div>
                     <div class="collapse-body" id="stats-body">

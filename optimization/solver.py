@@ -82,7 +82,8 @@ class TerritorySolver:
 
         cluster_sizes_arr = np.array(cluster_sizes)
 
-        # Precompute cluster-level mean distance in km and feasibility
+        # Precompute cluster-level mean distance in km, mean compatibility, and feasibility
+        cluster_mean_compat = np.zeros((num_clusters, num_ftcs))
         if distance_km is not None:
             cluster_mean_dist = np.zeros((num_clusters, num_ftcs))
         else:
@@ -91,6 +92,7 @@ class TerritorySolver:
 
         for c_idx, indices in enumerate(cluster_dealer_indices):
             cluster_feasible[c_idx] = feasibility_mask[indices].any(axis=0)
+            cluster_mean_compat[c_idx] = compatibility[indices].mean(axis=0)
             if distance_km is not None:
                 cluster_mean_dist[c_idx] = distance_km[indices].mean(axis=0)
             else:
@@ -149,16 +151,19 @@ class TerritorySolver:
                 assign[c_idx] = chosen
                 ftc_cnt[chosen] += s
 
-            # Score: lower distance + higher retention = better
+            # Score: higher compatibility + lower distance + higher retention = better
             total_km = 0.0
+            total_compat = 0.0
             kept = 0
             for c_idx, j in enumerate(assign):
                 total_km += cluster_mean_dist[c_idx, j] * cluster_sizes_arr[c_idx]
+                total_compat += cluster_mean_compat[c_idx, j] * cluster_sizes_arr[c_idx]
                 if use_disruption and j == cluster_current_ftc[c_idx]:
                     kept += cluster_sizes_arr[c_idx]
             mean_dist = total_km / cluster_sizes_arr.sum()
+            mean_compat = total_compat / cluster_sizes_arr.sum()
             kept_ratio = kept / cluster_sizes_arr.sum() if use_disruption else 0.0
-            trial_score = -mean_dist + lambda_penalty * kept_ratio
+            trial_score = alpha_1 * mean_compat - alpha_2 * (mean_dist / 100.0) + lambda_penalty * kept_ratio
 
             if trial_score > best_score:
                 best_score = trial_score

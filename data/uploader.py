@@ -65,14 +65,13 @@ def _normalize_col(name: str) -> str:
     """Normalize a column name for fuzzy matching."""
     n = str(name).strip().lower()
     n = re.sub(r'[\s_\-\.]+', '_', n)
-    n = re.sub(r'[^a-z0-9_]', '', n)  # strip special characters
+    n = re.sub(r'[^a-z0-9_]', '', n)
     n = n.strip('_')
     return n
 
 
 def _rename_columns(df: pd.DataFrame, mapping: dict) -> pd.DataFrame:
     renamed = {}
-    # Build a lookup from normalized -> internal name
     norm_lookup = {}
     for excel_col, internal_col in mapping.items():
         norm = _normalize_col(excel_col)
@@ -80,11 +79,9 @@ def _rename_columns(df: pd.DataFrame, mapping: dict) -> pd.DataFrame:
 
     for col in df.columns:
         stripped = str(col).strip()
-        # 1. exact match
         if stripped in mapping:
             renamed[col] = mapping[stripped]
             continue
-        # 2. case-insensitive
         low = stripped.lower()
         found = False
         for excel_col, internal_col in mapping.items():
@@ -94,14 +91,11 @@ def _rename_columns(df: pd.DataFrame, mapping: dict) -> pd.DataFrame:
                 break
         if found:
             continue
-        # 3. fuzzy match via normalized form
         norm = _normalize_col(stripped)
         if norm in norm_lookup:
             renamed[col] = norm_lookup[norm]
             continue
-        # 4. substring match with normalized keys
         for norm_key, internal_col in norm_lookup.items():
-            # Strip underscores for looser substring matching
             nk_flat = norm_key.replace('_', '')
             n_flat = norm.replace('_', '')
             if nk_flat in n_flat or n_flat in nk_flat:
@@ -150,11 +144,6 @@ class ExcelUploader:
         """
         Read an Excel file with 3 sheets (or 3 separate files) and convert
         to internal parquet format.
-
-        Accepts:
-        - A single .xlsx with sheets named 'Dealer Dataset', 'FTC Dataset',
-          'F2D Dataset' (or similar)
-        - A .zip containing 3 CSV files
         """
         path = Path(file_path)
         suffix = path.suffix.lower()
@@ -169,11 +158,9 @@ class ExcelUploader:
             raise ValueError(f"Unsupported file format: {suffix}")
 
     def _process_excel(self, path: Path) -> dict:
-        """Read an Excel file with 3 sheets."""
         xls = pd.ExcelFile(path)
         logger.info(f"Excel sheets found: {xls.sheet_names}")
 
-        # Find the right sheets by name pattern
         dealer_sheet = self._find_sheet(xls.sheet_names, ['dealer', 'dealer dataset'], 'dealers')
         ftc_sheet = self._find_sheet(xls.sheet_names, ['ftc', 'ftc dataset', 'ftc data'], 'FTCs')
         f2d_sheet = self._find_sheet(xls.sheet_names, ['f2d', 'relationship', 'f2d dataset', 'f2d data', 'assigned'], 'relationships')
@@ -192,7 +179,6 @@ class ExcelUploader:
         return self._transform_and_save(dealers_raw, ftcs_raw, rels_raw)
 
     def _process_zip(self, path: Path) -> dict:
-        """Read a zip file containing CSV files."""
         import zipfile
         import tempfile
 
@@ -208,11 +194,9 @@ class ExcelUploader:
             return self._transform_and_save(dealers_raw, ftcs_raw, rels_raw)
 
     def _process_csvs(self, path: Path) -> dict:
-        """Handle a single CSV (try to detect which sheet it is)."""
         df = pd.read_csv(path)
         cols_lower = {c.lower() for c in df.columns}
 
-        # Detect type based on columns
         if 'sm_id' in cols_lower or 'dealer_type' in cols_lower or 'dealer_type_static_mobile' in cols_lower:
             logger.info(f"Detected {path.name} as dealer data")
             return self._transform_and_save(df, pd.DataFrame(), pd.DataFrame())
@@ -247,10 +231,8 @@ class ExcelUploader:
     def _transform_and_save(self, dealers_raw: pd.DataFrame,
                             ftcs_raw: pd.DataFrame,
                             rels_raw: pd.DataFrame) -> dict:
-        """Map columns, clean data, and save parquet files."""
         stats = {}
 
-        # ---- Dealers ----
         if not dealers_raw.empty:
             dealers = self._transform_dealers(dealers_raw)
             stats['dealers'] = len(dealers)
@@ -260,7 +242,6 @@ class ExcelUploader:
             logger.warning("No dealer sheet found — writing empty dealers.parquet")
         dealers.to_parquet(self.output_dir / "dealers.parquet", index=False)
 
-        # ---- FTCs ----
         if not ftcs_raw.empty:
             ftcs = self._transform_ftcs(ftcs_raw)
             stats['ftcs'] = len(ftcs)
@@ -270,7 +251,6 @@ class ExcelUploader:
             logger.warning("No FTC sheet found — writing empty ftcs.parquet")
         ftcs.to_parquet(self.output_dir / "ftcs.parquet", index=False)
 
-        # ---- Relationships ----
         if not rels_raw.empty:
             rels = self._transform_relationships(rels_raw)
             stats['relationships'] = len(rels)
@@ -279,7 +259,6 @@ class ExcelUploader:
             rels = self._empty_relationships()
             logger.warning("No relationship sheet found — writing empty relationships.parquet")
 
-        # Remove relationships that reference dealers or FTCs not in the uploaded data
         valid_dealers = set(dealers['dealer_id']) if not dealers.empty else set()
         valid_ftcs = set(ftcs['ftc_id']) if not ftcs.empty else set()
         before = len(rels)
@@ -294,7 +273,6 @@ class ExcelUploader:
         stats['relationships'] = len(rels)
         rels.to_parquet(self.output_dir / "relationships.parquet", index=False)
 
-        # ---- Proximity (empty placeholder — computed on-demand if needed) ----
         pd.DataFrame(columns=[
             'dealer_id', 'related_dealer_id', 'product_group',
             'latitude', 'longitude', 'spatial_distance'
@@ -327,28 +305,23 @@ class ExcelUploader:
     def _transform_dealers(self, df: pd.DataFrame) -> pd.DataFrame:
         df = _rename_columns(df, DEALER_COLUMN_MAP)
 
-        # Ensure dealer_id is string
         if 'dealer_id' in df.columns:
             df['dealer_id'] = df['dealer_id'].astype(str)
 
-        # Map dealer_type
         if 'dealer_type' in df.columns:
             df['dealer_type'] = df['dealer_type'].astype(str).str.strip().str.lower()
         else:
             df['dealer_type'] = 'mobile'
 
-        # Default sm_id
         if 'sm_id' not in df.columns:
             df['sm_id'] = 'UNKNOWN'
         else:
             df['sm_id'] = df['sm_id'].fillna('UNKNOWN').astype(str)
 
-        # Clean numeric columns
         for col in ['count_bfl_disbursement', 'average_cases_per_day']:
             if col in df.columns:
                 df[col] = df[col].apply(_clean_numeric).fillna(0)
 
-        # Handle lat/lon — convert to numeric, then drop rows with missing coordinates
         if 'dealer_latitude' in df.columns:
             df['dealer_latitude'] = pd.to_numeric(df['dealer_latitude'], errors='coerce')
         else:
@@ -364,7 +337,6 @@ class ExcelUploader:
         if len(df) < before:
             logger.warning(f"Dropped {before - len(df)} dealers with missing coordinates")
 
-        # Add missing columns
         if 'product_group' not in df.columns:
             df['product_group'] = 'personal_loan'
 
@@ -388,7 +360,6 @@ class ExcelUploader:
             else:
                 df[col] = 0.0
 
-        # Normalize ntb_share and cross_sell: if values exceed 1.0 treat as percentages
         for col in ['ntb_share', 'cross_sell']:
             if col in df.columns:
                 df[col] = df[col].apply(_clean_numeric).fillna(0)

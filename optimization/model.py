@@ -96,37 +96,44 @@ class TerritoryModel:
         # reach it too.  This guarantees the cluster cohesion constraint (added in the
         # solver) is always satisfiable — without this, the intersection of feasible FTCs
         # across cluster members is often empty due to the tight 50km radius.
+        # Expansion is limited to FTCs within 1.5× the max travel radius of the cluster
+        # centroid (using mean dealer-FTC distance as proxy) to prevent far-away
+        # assignments that the post-solve enforcement step cannot fix.
         if cluster_labels is not None:
             unique_clusters = np.unique(cluster_labels)
+            expansion_radius = self.constraints.max_travel_radius_km * 1.5
             for c in unique_clusters:
                 cluster_indices = np.where(cluster_labels == c)[0]
                 cluster_union = np.zeros(num_ftcs, dtype=int)
                 for i in cluster_indices:
                     cluster_union |= feasibility_mask[i]
+                # Geo-fence: remove FTCs that are too far from the cluster centroid
+                if distance_km is not None:
+                    cluster_mean_dist = distance_km[cluster_indices].mean(axis=0)
+                    cluster_union &= (cluster_mean_dist <= expansion_radius).astype(int)
+                # Ensure every dealer in the cluster still has at least one option
                 for i in cluster_indices:
+                    if cluster_union.sum() == 0:
+                        cluster_union |= feasibility_mask[i]
                     feasibility_mask[i] = cluster_union
-            logger.info(f"Expanded feasibility mask for {len(unique_clusters)} clusters")
+            logger.info(f"Expanded feasibility mask for {len(unique_clusters)} clusters (radius={expansion_radius:.0f}km)")
 
-        # Enforce static dealers stay at their current FTC.
-        # A static dealer cannot be reassigned to a different FTC; only the
-        # FTC they are currently assigned to is feasible.
+        # Enforce static dealer constraint: static dealers must stay at their current FTC
         dealers_df = features.get('dealers')
         if dealers_df is not None and 'dealer_type' in dealers_df.columns:
-            static_mask = dealers_df['dealer_type'].str.lower() == 'static'
-            static_count = static_mask.sum()
-            if static_count > 0:
-                frozen = 0
-                for i in range(num_dealers):
-                    if not static_mask.iloc[i]:
-                        continue
-                    current_ftc = np.where(assignment_matrix[i] == 1)[0]
-                    if len(current_ftc) > 0:
+            dealer_types = dealers_df['dealer_type'].values
+            static_count = 0
+            for i in range(num_dealers):
+                if dealer_types[i] == 'static':
+                    current_ftc_idx = np.where(assignment_matrix[i] == 1)[0]
+                    if len(current_ftc_idx) > 0:
                         feasibility_mask[i, :] = 0
-                        feasibility_mask[i, current_ftc[0]] = 1
+                        feasibility_mask[i, current_ftc_idx[0]] = 1
                         pre_enforce_mask[i, :] = 0
-                        pre_enforce_mask[i, current_ftc[0]] = 1
-                        frozen += 1
-                logger.info(f"Frozen {frozen}/{static_count} static dealers to their current FTC")
+                        pre_enforce_mask[i, current_ftc_idx[0]] = 1
+                        static_count += 1
+            if static_count:
+                logger.info(f"Locked {static_count} static dealers to their current FTC")
 
         # Get optimization parameters
         opt_config = self.config.get('optimization', {})
@@ -182,19 +189,38 @@ class TerritoryModel:
                     j = np.argmax(assign[i])
                     if pre_enforce_mask[i, j] == 1:
                         continue
-                    # Move to nearest truly feasible FTC
                     feasible_ftcs = np.where(pre_enforce_mask[i] == 1)[0]
                     if len(feasible_ftcs) == 0:
                         continue
-                    order = feasible_ftcs[np.argsort(distance_km[i][feasible_ftcs])]
-                    for candidate in order:
-                        if ftc_counts[candidate] < max_d:
+                    # Score each feasible FTC by the objective: alpha_1 * compat - alpha_2 * (dist/100)
+                    scores = (alpha_1 * compatibility[i, feasible_ftcs]
+                              - alpha_2 * (distance_km[i, feasible_ftcs] / 100.0))
+                    best_idx = feasible_ftcs[np.argmax(scores)]
+                    if ftc_counts[best_idx] < max_d:
+                        assign[i, :] = 0
+                        assign[i, best_idx] = 1
+                        ftc_counts[best_idx] += 1
+                        ftc_counts[j] -= 1
+                        any_fixed = True
+                    else:
+                        # Single option (e.g. static dealer): force regardless of capacity
+                        if len(feasible_ftcs) == 1:
                             assign[i, :] = 0
-                            assign[i, candidate] = 1
-                            ftc_counts[candidate] += 1
+                            assign[i, best_idx] = 1
+                            ftc_counts[best_idx] += 1
                             ftc_counts[j] -= 1
                             any_fixed = True
-                            break
+                            continue
+                        # Capacity is full: try next best
+                        order = feasible_ftcs[np.argsort(-scores)]
+                        for candidate in order:
+                            if ftc_counts[candidate] < max_d:
+                                assign[i, :] = 0
+                                assign[i, candidate] = 1
+                                ftc_counts[candidate] += 1
+                                ftc_counts[j] -= 1
+                                any_fixed = True
+                                break
                 # Second pass: relax capacity for any remaining violations
                 for i in range(num_dealers):
                     j = np.argmax(assign[i])
@@ -203,12 +229,14 @@ class TerritoryModel:
                     feasible_ftcs = np.where(pre_enforce_mask[i] == 1)[0]
                     if len(feasible_ftcs) == 0:
                         continue
-                    order = feasible_ftcs[np.argsort(distance_km[i][feasible_ftcs])]
-                    candidate = order[0]
-                    assign[i, :] = 0
-                    assign[i, candidate] = 1
-                    ftc_counts[candidate] += 1
-                    ftc_counts[j] -= 1
+                    scores = (alpha_1 * compatibility[i, feasible_ftcs]
+                              - alpha_2 * (distance_km[i, feasible_ftcs] / 100.0))
+                    candidate = feasible_ftcs[np.argmax(scores)]
+                    if assign[i, candidate] != 1:
+                        assign[i, :] = 0
+                        assign[i, candidate] = 1
+                        ftc_counts[candidate] += 1
+                        ftc_counts[j] -= 1
                     any_fixed = True
                 if any_fixed:
                     logger.info(f"  Fixed {violations_before} dealer-level feasibility violations")

@@ -2,6 +2,7 @@
 API routes for territory optimization system.
 """
 import logging
+import os
 from typing import Dict, Any
 from flask import Blueprint, request, jsonify
 from functools import wraps
@@ -188,41 +189,6 @@ def get_scheduler_status():
     """Get the current status of the optimization scheduler."""
     return jsonify(scheduler.get_status())
 
-@api_bp.route('/upload', methods=['POST'])
-@require_db
-def upload_data():
-    """Upload Excel file with 3 sheets (Dealers, FTCs, F2D relationships)."""
-    try:
-        if 'file' not in request.files:
-            return jsonify({'status': 'error', 'message': 'No file provided'}), 400
-
-        file = request.files['file']
-        if file.filename == '':
-            return jsonify({'status': 'error', 'message': 'Empty filename'}), 400
-
-        import tempfile
-        import os
-        suffix = os.path.splitext(file.filename)[1] or '.xlsx'
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-        try:
-            file.save(tmp.name)
-            output_dir = config_manager.get_section('data').get('output_dir', 'data')
-            uploader = ExcelUploader(output_dir=output_dir)
-            stats = uploader.upload(tmp.name)
-        finally:
-            os.unlink(tmp.name)
-
-        return jsonify({
-            'status': 'success',
-            'message': 'Data uploaded and processed successfully',
-            'stats': stats
-        }), 200
-
-    except Exception as e:
-        logger.error(f"Upload failed: {e}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-
 @api_bp.route('/generate', methods=['POST'])
 def generate_data():
     """Generate synthetic data."""
@@ -236,6 +202,33 @@ def generate_data():
     except Exception as e:
         logger.error(f"Generation failed: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@api_bp.route('/upload', methods=['POST'])
+@require_db
+def upload_data():
+    """Upload Excel/CSV data files."""
+    import tempfile
+    try:
+        if 'file' not in request.files:
+            return jsonify({'status': 'error', 'message': 'No file provided'}), 400
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'status': 'error', 'message': 'Empty filename'}), 400
+        suffix = os.path.splitext(file.filename)[1] or '.xlsx'
+        fd, temp_path = tempfile.mkstemp(suffix=suffix)
+        os.close(fd)
+        try:
+            file.save(temp_path)
+            output_dir = config_manager.get_section('data').get('output_dir', 'data')
+            uploader = ExcelUploader(output_dir=output_dir)
+            stats = uploader.upload(temp_path)
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+        return jsonify({'status': 'success', 'stats': stats}), 200
+    except Exception as e:
+        logger.error(f"Upload failed: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 400
 
 @api_bp.route('/data/dealers', methods=['GET'])
 def get_dealers():
@@ -272,4 +265,3 @@ def get_relationships():
     except Exception as e:
         logger.error(f"Failed to fetch relationships: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
-
